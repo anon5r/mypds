@@ -1,0 +1,16 @@
+{
+  email admin@bsky.day
+  on_demand_tls {
+    ask http://pds:3000
+  }
+}
+
+pds.example,
+*.pds.example {
+  tls {
+    on_demand
+  }
+  reverse_proxy http://pds:3000
+}
+
+

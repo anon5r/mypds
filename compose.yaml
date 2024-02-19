@@ -1,0 +1,105 @@
+version: '3.9'
+services:
+  #caddy:
+  #  container_name: caddy
+  #  image: caddy:2
+  #  #network_mode: host
+  #  ports:
+  #    - 80:80
+  #    - 443:443
+  #  depends_on:
+  #    - pds
+  #  restart: unless-stopped
+  #  volumes:
+  #    - type: bind
+  #      source: /pds/caddy/data
+  #      target: /data
+  #    - type: bind
+  #      source: /pds/caddy/etc/caddy
+  #      target: /etc/caddy
+  #  networks:
+  #    - frontend
+
+  web:
+    container_name: nginx-proxy
+    ports: 
+      - 80:80
+      - 443:443
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - /pds/nginx/conf.d:/etc/nginx/conf.d
+      - /pds/nginx/data:/var/www
+    environment:
+      - TZ=Asia/Tokyo
+    depends_on:
+      - pds
+    networks:
+      - frontend
+
+  pds:
+    container_name: pds
+    image: ghcr.io/bluesky-social/pds:latest
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /pds/data/sandbox
+        target: /pds
+    env_file:
+      - /pds/pds-sandbox.env
+    healthcheck:
+      interval: 5s
+      retries: 20
+    depends_on:
+      - database
+    networks:
+      - frontend
+      - backend
+
+  watchtower:
+    container_name: watchtower
+    image: containrrr/watchtower:latest
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_CLEANUP: true
+      WATCHTOWER_SCHEDULE: "@midnight"
+    networks:
+      - frontend
+      - backend
+    
+  database:
+    container_name: database
+    hostname: pgdb
+    image: postgres:16-alpine
+    restart: always
+    env_file:
+      - /pds/postgres.env
+    volumes:
+      - /pds/postgres/init/:/docker-entrypoint-initdb.d/
+      - /pds/postgres/database/:/var/lib/postgresql/data/
+    healthcheck:
+      test: "pg_isready -U postgres -d postgres"
+      interval: 5s
+      retries: 20
+    networks:
+      - backend
+
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.10.0/24
+  
+  backend:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.20.0/24
+
