@@ -1,34 +1,40 @@
 version: '3.9'
 services:
-  caddy:
-    container_name: caddy
-    image: caddy:2
-    network_mode: host
-    depends_on:
-      - pds
+  # use nginx
+  nginx:
+    container_name: nginx-proxy
+    ports: 
+      - 80:80
+      - 443:443
+    image: nginx:alpine
     restart: unless-stopped
     volumes:
-      - type: bind
-        source: /pds/caddy/data
-        target: /data
-      - type: bind
-        source: /pds/caddy/etc/caddy
-        target: /etc/caddy
+      - ./configs/nginx/conf.d:/etc/nginx/conf.d
+      - ./configs/nginx/www:/var/www
+    env_file:
+      - ./envs/nginx.env
+    depends_on:
+      - pds
+    networks:
+      # Webプロクシはフロントエンドネットワークのみ
+      - frontend
   pds:
     container_name: pds
     image: ghcr.io/bluesky-social/pds:0.4
-    network_mode: host
     restart: unless-stopped
     volumes:
       - type: bind
-        source: /pds
+        source: ./data
         target: /pds
     env_file:
-      - /pds/pds.env
+      - ./envs/pds.env
+    networks:
+      - frontend
+      - backend
+  
   watchtower:
     container_name: watchtower
     image: containrrr/watchtower:latest
-    network_mode: host
     volumes:
       - type: bind
         source: /var/run/docker.sock
@@ -37,3 +43,21 @@ services:
     environment:
       WATCHTOWER_CLEANUP: true
       WATCHTOWER_SCHEDULE: "@midnight"
+    networks:
+      - frontend
+      - backend
+
+# docker network
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.10.0/24
+  backend:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.20.0/24
