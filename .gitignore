@@ -1,6 +1,5 @@
-!/posgtres.env
 *.env
+envs/*.env
 data/**
-caddy/data/*
 nginx/data
 postgres/database
