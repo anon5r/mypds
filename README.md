@@ -10,9 +10,9 @@ AT Protocol側の構成は省略します
 
 ```mermaid
 flowchart TD
-    User([fa:fa-user User]) -->|Request| URL(fab:fa-chrome https://pds.example)
-    URL -->|HTTPS:443 Universal SSL| CF[fab:fa-cloudflare Cloudflare]
-        CF -->|WAF / HTTP:80| SERVER[fab:fa-docker Docker]
+    User([User]) -->|Request| URL(https://pds.example)
+    URL -->|HTTPS:443 Universal SSL| CF[Cloudflare]
+        CF -->|WAF / HTTP:80| SERVER[Docker]
     subgraph VPS
         SERVER --> WEB(nginx)
         WEB -->|/.well-known/atproto-did| PDS[PDS]
