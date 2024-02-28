@@ -18,8 +18,7 @@ PDS 運用設定
 
 - PDSのトップを任意のページに差し替えます
 - ユーザーのハンドルをブラウザのアドレスバーに入力するとアカウントのプロフィールにリダイレクトします（bsky.appを利用）
-- 複数のPDSを同居できます
-  - `compose.yml` の更新、`config/nginx/conf.d/*` への追加、 `data` 以外のディレクトリを準備
+- 複数のPDSを同居できます [複数のPDSを同居させる](docs/MultiplePDS.md)
 
 
 # 構成図
@@ -29,13 +28,15 @@ AT Protocol側の構成は省略します
 
 ```mermaid
 flowchart TD
-    User([User]) -->|Request| URL(https://pds.example)
-    URL -->|HTTPS:443 Universal SSL| CF[Cloudflare]
+    User([User]) -->|Request| URL1(https://pds.example)
+    URL1 -->|HTTPS:443 Universal SSL| CF[Cloudflare]
+    BSKY([Bluesky]) -->|Verify handles| URL2(https://user.pds.example)
+    URL2 -->|HTTPS:443 Universal SSL| CF
         CF -->|WAF / HTTP:80| WEB(nginx)
     subgraph Docker
         WEB -->|/.well-known/atproto-did| PDS[PDS]
         WEB -->|/xrpc/*| PDS(PDS)
-        WEB -->|/|WEB2[Static web]
+        WEB -->|/index.html etc.|WEB2[Static web]
     end
 ```
 
@@ -53,20 +54,26 @@ flowchart TD
 
 デフォルトはCaddyをリバースプロキシとして起動し、HTTPS通信と証明書発行処理を自動で行ってくれます。
 
-しかしCaddyは発行されるハンドル毎に（正しくは、アクセスがあった際に証明書が存在していないサブドメイン名に対して）一つずつ証明書を発行し、適用するためカウント数が増えると運用が煩雑になる可能性があります。（通常はそれでも問題ないと思いますが）
+Caddyはリクエストがあった際にサーバーが証明書を持っていない場合、または有効期限が切れていた場合その場で証明書を発行リクエストし、適用します。
+
+フローが完全に自動化されており、大変便利ですが、リクエストされたサブドメイン毎に発行され、ワイルドカードで発行されるわけではないので、個人的にはあまり効率的ではないかなと考えています。
+
 
 ### ハンドルの発行履歴からハンドルを推測できる
 
-証明書の発行履歴はウェブ上から[追跡することも可能(crt.sh)](https://crt.sh/)なので、毎回証明書を発行されると、すぐに存在するハンドルを推測することができます。
+また、証明書の発行履歴はウェブ上から[追跡することも可能(crt.sh)](https://crt.sh/)なので、毎回証明書を発行されると、すぐに存在するハンドルを推測することができます。
+またこれを追ってすぐにそのサブドメインに対して攻撃的なリクエストを送信してくるbotもあり、開発環境程度ならともかく、ある程度の運用を想定して利用するには健全な形ではないかなと考えています。
+
 
 ## nginxに置き換える
 
 ここでは、Caddyを使用せず、nginxをWebサーバ兼リバースプロキシに置き換えて使用します。
-SSL証明書は Cloudflare で発行されるものを使用します。
+
+SSL証明書まわりの運用を簡易にするため、nginxはHTTPのみで運用し、SSL証明書は Cloudflare DNSで発行されるものを使用します。
 
 ### CloudflareのUniversal証明書利用時の注意
 
-CloudflareのUniversal証明書は無料で利用することができますが、発行対象はTLDとそのサブドメインまでです。
+CloudflareのUniversal証明書は無料で利用することができますが、発行対象はルートドメインと、そのサブドメインまでです。
 2階層目以降のサブドメインには適用されません。
 
 つまり、以下の様になります。
@@ -77,7 +84,11 @@ CloudflareのUniversal証明書は無料で利用することができますが�
 - ❌ `*.pds.example.com`
 - ❌ `*.abc.pds.example.com`
 
-Universal証明書ではなく、有料のAdvancedや持ち込みのCustom証明書を使用すればこの問題も解決できますが、コストがかかります。
+
+⭕Universal SSLの対象
+❌Universal SSLの対象外
+
+Universal SSLではなく、有料のAdvancedや持ち込みのCustom証明書を使用すればこの問題も解決できますが、何れも有償での利用となります。
 
 ## CloudflareのWebSocket設定
 
@@ -99,23 +110,26 @@ Universal証明書ではなく、有料のAdvancedや持ち込みのCustom証明
 ```plain
 /pds
   ├/configs
-  │ └/nginx                 -- nginx用設定ディレクトリ
+  │ └/nginx　                       -- nginx用設定ディレクトリ
   │   ├/conf.d
-  │   │  └default.conf      -- nginxからPDSにプロクシする設定
+  │   │  ├00_websocket.conf         -- WebSocket接続用設定
+  │   │  ├default.conf
+  │   │  ├pds.example-handle.conf   -- PDSのハンドル用
+  │   │  └pds.example.conf          -- PDS用Proxy設定Proxy設定
   │   └/www
   │     └/var/www 配下に相当する場所、コンテンツ置き場
-  ├/data                    -- PDS内で扱うデータ、自動生成される
-  │  ├accounts.sqlite       -- PDSのアカウント管理
-  │  ├/actors               -- プロフィールで操作されたもの、アバター画像など
-  │  ├/blocks               -- 不明
-  │  ├did_cache.sqlite      -- ハンドルとDIDのキャッシュ
-  │  └sequencer.sqlite      -- シーケンスID管理
-  ├/envs                    -- 環境変数置き場
-  │ ├nginx.env              -- nginxの環境設定
-  │ └pds.env                -- PDSの環境設定
+  ├/data                            -- PDS内で扱うデータ、自動生成される
+  │  ├accounts.sqlite               -- PDSのアカウント管理
+  │  ├/actors                       -- プロフィールで操作されたもの、アバター画像など
+  │  ├/blocks                       -- 
+  │  ├did_cache.sqlite              -- ハンドルとDIDのキャッシュ
+  │  └sequencer.sqlite              -- シーケンスID管理
+  ├/envs                            -- 環境変数置き場
+  │ ├nginx.env                      -- nginxの環境設定
+  │ └pds.env                        -- PDSの環境設定
   ├.gitignore
-  ├pds.env-example          -- PDS設定ファイルのサンプル設定
-  └README.md                -- このドキュメント
+  ├pds.env-example                  -- PDS設定ファイルのサンプル設定
+  └README.md                        -- このドキュメント
 ```
 
 
@@ -130,15 +144,15 @@ Universal証明書ではなく、有料のAdvancedや持ち込みのCustom証明
 /pds
   ├/caddy
   │  ├/data
-  │  │ └caddy           -- Caddyによって生成された証明書など
+  │  │ └caddy           -- Caddyによって生成された証明書など(自動作成)
   │  └/etc
   │    └Caddyfile       -- Caddy設定ファイル
   ├pds.env              -- PDSの環境設定
-  ├accounts.sqlite      -- PDSのアカウントDB
-  ├/actors              -- プロフィールで操作されたもの、アバタなどアカウントデータ
-  ├/blocks              -- 不明
-  ├did_cache.sqlite     -- ハンドルとDIDのキャッシュ
-  └sequencer.sqlite     -- シーケンスID管理
+  ├accounts.sqlite      -- PDSのアカウントDB(自動作成)
+  ├/actors              -- プロフィールで操作されたもの、アバタなどアカウントデータ(自動作成)
+  ├/blocks              -- (自動作成)
+  ├did_cache.sqlite     -- ハンドルとDIDのキャッシュ(自動作成)
+  └sequencer.sqlite     -- シーケンスID管理(自動作成)
 ```
 
 
