@@ -19,12 +19,14 @@ services:
       - frontend
   pds:
     container_name: pds
-    image: ghcr.io/bluesky-social/pds:0.4
+    image: ghcr.io/bluesky-social/pds:latest
     restart: unless-stopped
     volumes:
       - type: bind
         source: ./data
         target: /pds
+    labels:
+      - 'com.centurylinklabs.watchtower.enable=true'
     env_file:
       - ./envs/pds.env
     networks:
@@ -42,9 +44,6 @@ services:
     environment:
       WATCHTOWER_CLEANUP: true
       WATCHTOWER_SCHEDULE: "@midnight"
-    networks:
-      - frontend
-      - backend
 
 # docker network
 networks:
